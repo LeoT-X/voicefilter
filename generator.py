@@ -11,14 +11,18 @@ from multiprocessing import Pool, cpu_count
 from utils.audio import Audio
 from utils.hparams import HParam
 
+'''generates audio files with 2 speakers from audio files with 1 speaker'''
+
 
 def formatter(dir_, form, num):
+    '''format for output files'''
     return os.path.join(dir_, form.replace('*', '%06d' % num))
 
 def vad_merge(w):
+    '''Deletes silent intervals from input audio'''
     intervals = librosa.effects.split(w, top_db=20)
     temp = list()
-    for s, e in intervals:
+    for s, e in intervals: #start and end time of every interval
         temp.append(w[s:e])
     return np.concatenate(temp, axis=None)
 
@@ -87,6 +91,8 @@ if __name__ == '__main__':
                         help="Directory of LibriSpeech dataset, containing folders of train-clean-100, train-clean-360, dev-clean.")
     parser.add_argument('-v', '--voxceleb_dir', type=str, default=None,
                         help="Directory of VoxCeleb2 dataset, ends with 'aac'")
+    parser.add_argument('-cu', '--current_corpus_dir', type=str, default=None,
+                        help="Directory of currentCorpus dataset")
     parser.add_argument('-o', '--out_dir', type=str, required=True,
                         help="Directory of output training triplet")
     parser.add_argument('-p', '--process_num', type=int, default=None,
@@ -95,27 +101,27 @@ if __name__ == '__main__':
                         help='apply vad to wav file. yes(1) or no(0, default)')
     args = parser.parse_args()
 
-    os.makedirs(args.out_dir, exist_ok=True)
-    os.makedirs(os.path.join(args.out_dir, 'train'), exist_ok=True)
-    os.makedirs(os.path.join(args.out_dir, 'test'), exist_ok=True)
+    os.makedirs(args.out_dir, exist_ok=True)    # Creates output directory
+    os.makedirs(os.path.join(args.out_dir, 'train'), exist_ok=True) # Creates train output directory
+    os.makedirs(os.path.join(args.out_dir, 'test'), exist_ok=True)  # Creates test output dorectory
 
-    hp = HParam(args.config)
+    hp = HParam(args.config)  # hp contains the informations of config.yaml
 
     cpu_num = cpu_count() if args.process_num is None else args.process_num
 
-    if args.libri_dir is None and args.voxceleb_dir is None:
+    if args.libri_dir is None and args.voxceleb_dir is None and args.current_corpus_dir is None:
         raise Exception("Please provide directory of data")
 
     if args.libri_dir is not None:
-        train_folders = [x for x in glob.glob(os.path.join(args.libri_dir, 'train-clean-100', '*'))
+        # train_folders = all subfolders of train-clean-100
+        train_folders = [x for x in glob.glob(os.path.join(args.libri_dir, 'train-clean-100', '*')) 
                             if os.path.isdir(x)] + \
                         [x for x in glob.glob(os.path.join(args.libri_dir, 'train-clean-360', '*'))
                             if os.path.isdir(x)]
-                        # we recommned to exclude train-other-500
-                        # See https://github.com/mindslab-ai/voicefilter/issues/5#issuecomment-497746793
                         # + \
                         #[x for x in glob.glob(os.path.join(args.libri_dir, 'train-other-500', '*'))
                         #    if os.path.isdir(x)]
+        # test_folders = all subfolders of dev-clean
         test_folders = [x for x in glob.glob(os.path.join(args.libri_dir, 'dev-clean', '*'))]
 
     elif args.voxceleb_dir is not None:
@@ -123,11 +129,20 @@ if __name__ == '__main__':
                             if os.path.isdir(x)]
         train_folders = all_folders[:-20]
         test_folders = all_folders[-20:]
+    
+    elif args.current_corpus_dir is not None:
+        all_folders = [x for x in glob.glob(os.path.join(args.current_corpus_dir,'extracted','data','mathia', '*'))
+                            if os.path.isdir(x)]
+        train_folders = all_folders[:-20]
+        test_folders = all_folders[-20:]
+        
 
+    #train_spk = all files in train_folders
     train_spk = [glob.glob(os.path.join(spk, '**', hp.form.input), recursive=True)
                     for spk in train_folders]
     train_spk = [x for x in train_spk if len(x) >= 2]
 
+    #test_spk = all files in test_folders
     test_spk = [glob.glob(os.path.join(spk, '**', hp.form.input), recursive=True)
                     for spk in test_folders]
     test_spk = [x for x in test_spk if len(x) >= 2]
@@ -135,21 +150,23 @@ if __name__ == '__main__':
     audio = Audio(hp)
 
     def train_wrapper(num):
+        '''Randomly chose 2 speakers from training set and mix them'''
         spk1, spk2 = random.sample(train_spk, 2)
         s1_dvec, s1_target = random.sample(spk1, 2)
         s2 = random.choice(spk2)
         mix(hp, args, audio, num, s1_dvec, s1_target, s2, train=True)
 
     def test_wrapper(num):
+        '''Randomly chose 2 speakers from testing set and mix them'''
         spk1, spk2 = random.sample(test_spk, 2)
         s1_dvec, s1_target = random.sample(spk1, 2)
         s2 = random.choice(spk2)
         mix(hp, args, audio, num, s1_dvec, s1_target, s2, train=False)
 
-    arr = list(range(10**5))
-    with Pool(cpu_num) as p:
+    arr = list(range(3*10**4))    # Amount of train files created
+    with Pool(cpu_num) as p:    # Pool used for multiprocessing
         r = list(tqdm.tqdm(p.imap(train_wrapper, arr), total=len(arr)))
 
-    arr = list(range(10**2))
+    arr = list(range(10**2))    # Amount of test files created
     with Pool(cpu_num) as p:
         r = list(tqdm.tqdm(p.imap(test_wrapper, arr), total=len(arr)))
