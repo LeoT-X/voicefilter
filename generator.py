@@ -131,10 +131,10 @@ if __name__ == '__main__':
         test_folders = all_folders[-20:]
     
     elif args.current_corpus_dir is not None:
-        all_folders = [x for x in glob.glob(os.path.join(args.current_corpus_dir,'extracted','data','mathia', '*'))
+        train_folders = [x for x in glob.glob(os.path.join(args.current_corpus_dir, 'train')) 
                             if os.path.isdir(x)]
-        train_folders = all_folders[:-20]
-        test_folders = all_folders[-20:]
+        test_folders  = [x for x in glob.glob(os.path.join(args.current_corpus_dir, 'test')) 
+                            if os.path.isdir(x)]
         
 
     #train_spk = all files in train_folders
